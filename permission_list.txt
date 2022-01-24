@@ -1,0 +1,16 @@
+❯ ls /home/ftp
+drwxrwx--x  4 sysadm  ftpvip         4B Nov 28 02:20 hidden
+drwxrwxrwx  2 sysadm  systemUser     3B Nov 28 02:20 public
+drwxrwxrwt  2 sysadm  ftpvip         2B Nov 28 02:20 upload
+
+❯ ls /home/ftp/hidden
+drwxrwx--x  4 sysadm  ftpvip      4 Nov 28 02:20 .
+drwxr-xr-x  5 root    wheel       5 Nov 11 02:31 ..
+drwxr-xr-x  2 sysadm  systemUser  2 Nov 28 02:20 .exe
+drwxr-x--x  2 root    ftpuser     3 Nov 11 03:50 treasure
+
+❯ ls /home/ftp/hidden/treasure
+-rw-r--r--  1 root  ftpuser  0 Nov 11 03:50 secret
+
+❯ ls /home/ftp/public
+-rw-r--r--  1 root  systemUser    55B Nov 28 02:20 pureftpd.viofile

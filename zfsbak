@@ -1,0 +1,127 @@
+#! /usr/local/bin/bash
+USER_HOME=$(eval echo ~"${SUDO_USER}")
+if [ "$(whoami)" != "root" ]; then
+    echo "Please run with root privilege."
+    exit 1
+fi
+if [ $# -eq 0 ]; then
+    echo "Usage:
+- create: zfsbak DATASET [ROTATION_CNT]
+- list: zfsbak -l|--list [DATASET|ID|DATASET ID]
+- delete: zfsbak -d|--delete [DATASET|ID|DATASET ID]
+- export: zfsbak -e|--export DATASET [ID]
+- import: zfsbak -i|--import FILENAME DATASET"
+    exit 1
+fi
+case $1 in
+    -l|--list)
+        id=1
+        cursnapshots=$(zfs list -t snapshot -s creation 2> /dev/null | wc -l | tr -d ' ')
+        if [ "$cursnapshots" != "0" ]; then cursnapshots=$((cursnapshots-1))
+        else cursnapshots=$((0)); fi
+        echo -e "ID\tDATASET\t\tTIME"
+        if [ $# -eq 1 ]; then
+            while [ $id -le $cursnapshots ]; do    
+                echo -e "$id\t$(zfs list -t snapshot -s creation | head -$((id+1)) | tail -1 | cut -d ' ' -f 1 | tr @ '\t')"
+                id=$((id+1))
+            done
+        fi
+        if [ $# -eq 2 ]; then
+            if [ "$2" -eq "$2" ] 2>/dev/null; then
+                echo -e "$2\t$(zfs list -t snapshot -s creation | head -$(($2+1)) | tail -1 | cut -d ' ' -f 1 | tr @ '\t')"
+            else
+                cursnapshots=$(zfs list -t snapshot -s creation "$2" 2> /dev/null | wc -l | tr -d ' ')
+                if [ "$cursnapshots" != "0" ]; then cursnapshots=$((cursnapshots-1))
+                else cursnapshots=$((0)); fi
+                while [ $id -le $cursnapshots ]; do    
+                    echo -e "$id\t$(zfs list -t snapshot -s creation "$2" | head -$((id+1)) | tail -1 | cut -d ' ' -f 1 | tr @ '\t')"
+                    id=$((id+1))
+                done
+            fi
+        fi
+        if [ $# -eq 3 ]; then
+            echo -e "$3\t$(zfs list -t snapshot -s creation "$2" | head -$(($3+1)) | tail -1 | cut -d ' ' -f 1 | tr @ '\t')"
+        fi
+    ;;
+    -d|--delete)
+        id=1
+        cursnapshots=$(zfs list -t snapshot -s creation 2> /dev/null | wc -l | tr -d ' ')
+        if [ "$cursnapshots" != "0" ]; then cursnapshots=$((cursnapshots-1))
+        else exit 0; fi
+        if [ $# -eq 1 ]; then
+            while [ $id -le $cursnapshots ]; do    
+                snapshotname=$(zfs list -t snapshot -s creation | head -$((id+1)) | tail -1 | cut -d ' ' -f1)
+                zfs destroy "$snapshotname"
+                echo Destroy "$snapshotname"
+                id=$((id+1))
+            done
+        fi
+        if [ $# -eq 2 ]; then
+            if [ "$2" -eq "$2" ] 2>/dev/null; then
+                snapshotname=$(zfs list -t snapshot -s creation | head -$(($2+1)) | tail -1 | cut -d ' ' -f1)
+                zfs destroy "$snapshotname"
+                echo Destroy "$snapshotname"
+            else
+                cursnapshots=$(zfs list -t snapshot -s creation "$2" 2> /dev/null | wc -l | tr -d ' ')
+                if [ "$cursnapshots" != "0" ]; then cursnapshots=$((cursnapshots-1))
+                else cursnapshots=$((0)); fi
+                while [ $id -le $cursnapshots ]; do    
+                    snapshotname=$(zfs list -t snapshot -s creation "$2" | head -$((id+1)) | tail -1 | cut -d ' ' -f1)
+                    zfs destroy "$snapshotname"
+                    echo Destroy "$snapshotname"
+                    id=$((id+1))
+                done
+            fi
+        fi
+        if [ $# -ge 3 ]; then
+            declare -A snapshotnamea
+            for i in "$@"; do
+                if [ "$i" -eq "$i" ] 2>/dev/null; then
+                    snapshotnamea["$i"]=$(zfs list -t snapshot -s creation "$2" | head -$((i+1)) | tail -1 | cut -d ' ' -f1)
+                fi
+            done
+            for name in "${snapshotnamea[@]}"; do
+                zfs destroy "$name"
+                echo Destroy "$name"
+            done
+        fi
+    ;;
+    -e|--export)
+        id=1
+        if [ $# -eq 3 ]; then id=$(($3));fi
+        snapshotname=$(zfs list -t snapshot -s creation "$2" | head -$((id+1)) | tail -1 | cut -d ' ' -f 1)
+        zfs send "$snapshotname" | gzip | openssl aes-256-cbc -out "$USER_HOME/$(echo "$snapshotname.gz.enc" | tr / _)" 2>/dev/null
+        echo Export "$snapshotname" to '~/'"$(echo "$snapshotname.gz.enc" | tr / _)"
+    ;;
+    -i|--import)
+        openssl aes-256-cbc -d -in "$2" -out "$(basename "$2" ".enc")" 2>/dev/null
+        rm "$2"
+        gzip -d "$(basename "$2" ".enc")"
+        zfs receive "$3" < "$(basename "$2" ".gz.enc")"
+        echo Import '~/'"$2" to "$3"
+    ;;
+    *)
+        cursnapshots=$(zfs list -t snapshot -s creation "$1" 2> /dev/null | wc -l | tr -d ' ')
+        if [ "$cursnapshots" != "0" ]; then cursnapshots=$((cursnapshots-1))
+        else cursnapshots=$((0)); fi
+        if [ $cursnapshots -gt 0 ]; then
+            snapshotname=$(zfs list -t snapshot -s creation "$1" | tail -1 | cut -d ' ' -f1)
+            if [ "$(zfs diff "$snapshotname" | wc -l)" -eq 0 ]; then
+                echo "Snapshot is the same as latest one!"
+                exit 0
+            fi
+        fi
+        snapshotname=$(date +"%Y-%m-%d-%H:%M:%S")
+        zfs snapshot "$1"@"$snapshotname"
+        echo Snap "$1"@"$snapshotname"
+        cursnapshots=$((cursnapshots+1))
+        rotations=$((20))
+        if [ "$2" != "" ]; then rotations=$(("$2")) ;fi
+        while [ $cursnapshots -gt $rotations ]; do
+            snapshotname=$(zfs list -t snapshot -s creation "$1" | head -2 | tail -1 | cut -d ' ' -f1)
+            zfs destroy "$snapshotname"
+            echo Destroy "$snapshotname"
+            cursnapshots=$((cursnapshots-1))
+        done
+    ;;
+esac
